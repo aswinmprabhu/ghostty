@@ -3051,14 +3051,20 @@ fn clickMoveCursor(self: *Surface, to: terminal.Pin) !void {
     // support this feature. It is just too messy.
     if (t.active_screen != .primary) return;
 
-    // This flag is only set if we've seen at least one semantic prompt
-    // OSC sequence. If we've never seen that sequence, we can't possibly
-    // move the cursor so we can fast path out of here.
-    if (!t.flags.shell_redraws_prompt) return;
-
-    // Get our path
     const from = t.screen.cursor.page_pin.*;
-    const path = t.screen.promptPath(from, to);
+    // Convert to points
+    const from_pt = t.screen.pages.pointFromPin(.screen, from).?.screen;
+    const to_pt = t.screen.pages.pointFromPin(.screen, to).?.screen;
+
+    // Basic math to calculate our path.
+    const from_x: isize = @intCast(from_pt.x);
+    const from_y: isize = @intCast(from_pt.y);
+    const to_x: isize = @intCast(to_pt.x);
+    const to_y: isize = @intCast(to_pt.y);
+    const path: struct {
+        x: isize,
+        y: isize,
+    } = .{ .x = to_x - from_x, .y = to_y - from_y };
     log.debug("click-to-move-cursor from={} to={} path={}", .{ from, to, path });
 
     // If we aren't moving at all, fast path out of here.
@@ -3071,12 +3077,14 @@ fn clickMoveCursor(self: *Surface, to: terminal.Pin) !void {
     // We do Y first because it prevents any weird wrap behavior.
     if (path.y != 0) {
         const arrow = if (path.y < 0) arrow: {
-            break :arrow if (t.modes.get(.cursor_keys)) "\x1bOA" else "\x1b[A";
+            break :arrow if (t.modes.get(.cursor_keys)) "\x1bOD" else "\x1b[D";
         } else arrow: {
-            break :arrow if (t.modes.get(.cursor_keys)) "\x1bOB" else "\x1b[B";
+            break :arrow if (t.modes.get(.cursor_keys)) "\x1bOC" else "\x1b[C";
         };
         for (0..@abs(path.y)) |_| {
-            self.io.queueMessage(.{ .write_stable = arrow }, .locked);
+            for (0..@abs(self.size.grid().columns)) |_| {
+                self.io.queueMessage(.{ .write_stable = arrow }, .locked);
+            }
         }
     }
     if (path.x != 0) {
