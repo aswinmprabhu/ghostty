@@ -30,31 +30,7 @@ extension NSApplication {
     @objc(scriptWindows)
     var scriptWindows: [ScriptWindow] {
         guard isAppleScriptEnabled else { return [] }
-
-        // AppKit exposes one NSWindow per tab. AppleScript users expect one
-        // top-level window object containing multiple tabs, so we dedupe tab
-        // siblings into a single ScriptWindow.
-        var seen: Set<ObjectIdentifier> = []
-        var result: [ScriptWindow] = []
-
-        for controller in orderedTerminalControllers {
-            // Collapse each controller to one canonical representative for the
-            // whole tab group. Standalone windows map to themselves.
-            guard let primary = primaryTerminalController(for: controller) else {
-                continue
-            }
-
-            let primaryControllerID = ObjectIdentifier(primary)
-            guard seen.insert(primaryControllerID).inserted else {
-                // Another tab from this group already created the scripting
-                // window object.
-                continue
-            }
-
-            result.append(ScriptWindow(primaryController: primary))
-        }
-
-        return result
+        return orderedTerminalControllers.map(ScriptWindow.init(primaryController:))
     }
 
     /// Enables AppleScript unique-ID lookup for window references.
@@ -263,23 +239,15 @@ extension NSApplication {
             return nil
         }
 
-        let createdTabID = ScriptTab.stableID(controller: createdController)
+        let owningWindow = targetWindow ?? scriptWindows.first {
+            $0.stableID == ScriptWindow.stableID(primaryController: createdController)
+        } ?? ScriptWindow(primaryController: createdController)
 
-        if let targetWindow,
-           let scriptTab = targetWindow.valueInTabs(uniqueID: createdTabID) {
-            return scriptTab
+        if let selectedTab = createdController.selectedTab {
+            return ScriptTab(window: owningWindow, controller: createdController, tabID: selectedTab.id)
         }
 
-        for scriptWindow in scriptWindows {
-            if let scriptTab = scriptWindow.valueInTabs(uniqueID: createdTabID) {
-                return scriptTab
-            }
-        }
-
-        // Fall back to wrapping the created controller if AppKit tab-group
-        // bookkeeping has not fully refreshed in the current run loop.
-        let fallbackWindow = ScriptWindow(primaryController: createdController)
-        return ScriptTab(window: fallbackWindow, controller: createdController)
+        return ScriptTab(window: owningWindow, controller: createdController)
     }
 }
 
@@ -309,7 +277,13 @@ extension NSApplication {
     /// terminal windows. This powers both terminal enumeration and ID lookup.
     fileprivate var allSurfaceViews: [Ghostty.SurfaceView] {
         allTerminalControllers
-            .flatMap { $0.surfaceTree.root?.leaves() ?? [] }
+            .flatMap { controller in
+                if let terminalController = controller as? TerminalController {
+                    return terminalController.allTabSurfaceViews
+                }
+
+                return controller.surfaceTree.root?.leaves() ?? []
+            }
     }
 
     /// All terminal controllers in undefined order.
@@ -320,22 +294,5 @@ extension NSApplication {
     /// All terminal controllers in front-to-back order.
     fileprivate var orderedTerminalControllers: [BaseTerminalController] {
         NSApp.orderedWindows.compactMap { $0.windowController as? BaseTerminalController }
-    }
-
-    /// Identifies the primary tab controller for a window's tab group.
-    ///
-    /// This gives us one stable representative for all tabs in the same native
-    /// AppKit tab group.
-    ///
-    /// For standalone windows this returns the window's controller directly.
-    /// For tabbed windows, "primary" is currently the first controller in the
-    /// tab group's ordered windows list.
-    fileprivate func primaryTerminalController(for controller: BaseTerminalController) -> BaseTerminalController? {
-        guard let window = controller.window else { return nil }
-        guard let tabGroup = window.tabGroup else { return controller }
-
-        return tabGroup.windows
-            .compactMap { $0.windowController as? BaseTerminalController }
-            .first
     }
 }

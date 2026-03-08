@@ -94,13 +94,9 @@ class TerminalWindow: NSWindow {
             self.configureTabContextMenuIfNeeded(menu)
         }
 
-        // This is required so that window restoration properly creates our tabs
-        // again. I'm not sure why this is required. If you don't do this, then
-        // tabs restore as separate windows.
-        tabbingMode = .preferred
-        DispatchQueue.main.async {
-            self.tabbingMode = .automatic
-        }
+        // Sidebar tabs are fully Ghostty-managed, so native AppKit tabbing must
+        // remain disabled regardless of system preferences.
+        tabbingMode = .disallowed
 
         // All new windows are based on the app config at the time of creation.
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
@@ -778,9 +774,9 @@ extension TerminalWindow {
         let paletteItem = NSMenuItem()
         paletteItem.identifier = Self.tabColorPaletteIdentifier
         paletteItem.view = makeTabColorPaletteView(
-            selectedColor: (target?.window as? TerminalWindow)?.tabColor ?? .none
+            selectedColor: target?.selectedTab?.tabColor ?? (target?.window as? TerminalWindow)?.tabColor ?? .none
         ) { [weak target] color in
-            (target?.window as? TerminalWindow)?.tabColor = color
+            target?.setCurrentTabColorFromExternal(color)
         }
         menu.addItem(paletteItem)
     }
@@ -812,6 +808,10 @@ extension TerminalWindow: TabTitleEditorDelegate {
         _ editor: TabTitleEditor,
         titleFor targetWindow: NSWindow
     ) -> String {
+        if let targetController = targetWindow.windowController as? TerminalController {
+            return targetController.selectedTab?.titleOverride ?? targetWindow.title
+        }
+
         guard let targetController = targetWindow.windowController as? BaseTerminalController else {
             return targetWindow.title
         }
@@ -824,6 +824,11 @@ extension TerminalWindow: TabTitleEditorDelegate {
         didCommitTitle editedTitle: String,
         for targetWindow: NSWindow
     ) {
+        if let targetController = targetWindow.windowController as? TerminalController {
+            targetController.setCurrentTabTitleOverrideFromExternal(editedTitle.isEmpty ? nil : editedTitle)
+            return
+        }
+
         guard let targetController = targetWindow.windowController as? BaseTerminalController else { return }
         targetController.titleOverride = editedTitle.isEmpty ? nil : editedTitle
     }

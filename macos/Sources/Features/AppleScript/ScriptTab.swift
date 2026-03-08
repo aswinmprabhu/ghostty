@@ -21,14 +21,18 @@ final class ScriptTab: NSObject {
     /// This can become `nil` if the tab closes while a script is running.
     private weak var controller: BaseTerminalController?
 
+    /// Stable identifier for Ghostty-managed sidebar tabs.
+    private let tabID: UUID?
+
     /// Called by `ScriptWindow.tabs` / `ScriptWindow.selectedTab`.
     ///
     /// The ID is computed once so object specifiers built from this instance keep
     /// a consistent tab identity.
-    init(window: ScriptWindow, controller: BaseTerminalController) {
-        self.stableID = Self.stableID(controller: controller)
+    init(window: ScriptWindow, controller: BaseTerminalController, tabID: UUID? = nil) {
+        self.stableID = Self.stableID(controller: controller, tabID: tabID)
         self.window = window
         self.controller = controller
+        self.tabID = tabID
     }
 
     /// Exposed as the AppleScript `id` property.
@@ -44,6 +48,10 @@ final class ScriptTab: NSObject {
     @objc(title)
     var title: String {
         guard NSApp.isAppleScriptEnabled else { return "" }
+        if let tabState {
+            return tabState.title
+        }
+
         return controller?.window?.title ?? ""
     }
 
@@ -54,7 +62,7 @@ final class ScriptTab: NSObject {
     var index: Int {
         guard NSApp.isAppleScriptEnabled else { return 0 }
         guard let controller else { return 0 }
-        return window?.tabIndex(for: controller) ?? 0
+        return window?.tabIndex(for: controller, tabID: tabID) ?? 0
     }
 
     /// Exposed as the AppleScript `selected` property.
@@ -64,7 +72,7 @@ final class ScriptTab: NSObject {
     var selected: Bool {
         guard NSApp.isAppleScriptEnabled else { return false }
         guard let controller else { return false }
-        return window?.tabIsSelected(controller) ?? false
+        return window?.tabIsSelected(controller, tabID: tabID) ?? false
     }
 
     /// Best-effort native window containing this tab.
@@ -85,6 +93,11 @@ final class ScriptTab: NSObject {
     @objc(terminals)
     var terminals: [ScriptTerminal] {
         guard NSApp.isAppleScriptEnabled else { return [] }
+        if let tabState {
+            return (tabState.surfaceTree.root?.leaves() ?? [])
+                .map(ScriptTerminal.init)
+        }
+
         guard let controller else { return [] }
         return (controller.surfaceTree.root?.leaves() ?? [])
             .map(ScriptTerminal.init)
@@ -94,6 +107,12 @@ final class ScriptTab: NSObject {
     @objc(valueInTerminalsWithUniqueID:)
     func valueInTerminals(uniqueID: String) -> ScriptTerminal? {
         guard NSApp.isAppleScriptEnabled else { return nil }
+        if let tabState {
+            return (tabState.surfaceTree.root?.leaves() ?? [])
+                .first(where: { $0.id.uuidString == uniqueID })
+                .map(ScriptTerminal.init)
+        }
+
         guard let controller else { return nil }
         return (controller.surfaceTree.root?.leaves() ?? [])
             .first(where: { $0.id.uuidString == uniqueID })
@@ -104,6 +123,19 @@ final class ScriptTab: NSObject {
     @objc(handleSelectTabCommand:)
     func handleSelectTab(_ command: NSScriptCommand) -> Any? {
         guard NSApp.validateScript(command: command) else { return nil }
+
+        if let controller = controller as? TerminalController,
+           let tabID {
+            guard controller.selectTab(id: tabID, focus: true) else {
+                command.scriptErrorNumber = errAEEventFailed
+                command.scriptErrorString = "Tab is no longer available."
+                return nil
+            }
+
+            controller.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return nil
+        }
 
         guard let tabContainerWindow = parentWindow else {
             command.scriptErrorNumber = errAEEventFailed
@@ -120,6 +152,16 @@ final class ScriptTab: NSObject {
     @objc(handleCloseTabCommand:)
     func handleCloseTab(_ command: NSScriptCommand) -> Any? {
         guard NSApp.validateScript(command: command) else { return nil }
+
+        if let managedTerminalController = controller as? TerminalController,
+           let tabID {
+            managedTerminalController.closeTabImmediately(
+                tabID: tabID,
+                registerUndo: true,
+                registerRedo: false
+            )
+            return nil
+        }
 
         guard let tabController = parentController else {
             command.scriptErrorNumber = errAEEventFailed
@@ -163,11 +205,17 @@ final class ScriptTab: NSObject {
 }
 
 extension ScriptTab {
-    /// Stable ID for one tab controller.
-    ///
-    /// Tab identity belongs to `ScriptTab`, so both tab creation and tab ID
-    /// lookups in `ScriptWindow` call this helper.
-    static func stableID(controller: BaseTerminalController) -> String {
-        "tab-\(ObjectIdentifier(controller).hexString)"
+    private var tabState: TerminalTabState? {
+        guard let terminalController = controller as? TerminalController,
+              let tabID else { return nil }
+        return terminalController.tabState(id: tabID)
+    }
+
+    static func stableID(controller: BaseTerminalController, tabID: UUID? = nil) -> String {
+        if let tabID {
+            return "tab-\(tabID.uuidString)"
+        }
+
+        return "tab-\(ObjectIdentifier(controller).hexString)"
     }
 }

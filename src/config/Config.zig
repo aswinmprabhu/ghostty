@@ -2110,7 +2110,8 @@ keybind: Keybinds = .{},
 ///   * `ghostty` - Use the background and foreground colors specified in the
 ///     Ghostty configuration. This is only supported on Linux builds.
 ///
-/// On macOS, if `macos-titlebar-style` is `tabs` or `transparent`, the window theme will be
+/// On macOS, if `macos-titlebar-style` is `transparent` (or the compatibility
+/// alias `tabs`), the window theme will be
 /// automatically set based on the luminosity of the terminal background color.
 /// This only applies to terminal windows. This setting will still apply to
 /// non-terminal windows within Ghostty.
@@ -3198,12 +3199,9 @@ keybind: Keybinds = .{},
 /// avoids a disjointed appearance where the titlebar color changes
 /// but all the topmost terminals don't match.
 ///
-/// The "tabs" style is a completely custom titlebar that integrates the
-/// tab bar into the titlebar. This titlebar always matches the background
-/// color of the terminal. There are some limitations to this style:
-/// On macOS 13 and below, saved window state will not restore tabs correctly.
-/// macOS 14 does not have this issue and any other macOS version has not
-/// been tested.
+/// The "tabs" value is kept as a compatibility alias for "transparent".
+/// On macOS, terminal tabs are always rendered in Ghostty's sidebar rather
+/// than in the system titlebar, regardless of this setting.
 ///
 /// The "hidden" style hides the titlebar. Unlike `window-decoration = none`,
 /// however, it does not remove the frame from the window or cause it to have

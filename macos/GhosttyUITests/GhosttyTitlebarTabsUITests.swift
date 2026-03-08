@@ -1,10 +1,3 @@
-//
-//  GhosttyTitlebarTabsUITests.swift
-//  Ghostty
-//
-//  Created by luca on 16.10.2025.
-//
-
 import XCTest
 
 final class GhosttyTitlebarTabsUITests: GhosttyCustomConfigCase {
@@ -14,130 +7,81 @@ final class GhosttyTitlebarTabsUITests: GhosttyCustomConfigCase {
         try updateConfig(
             """
             macos-titlebar-style = tabs
-            title = "GhosttyTitlebarTabsUITests"
+            title = "GhosttySidebarTabsUITests"
             """
         )
     }
 
     @MainActor
-    func testCustomTitlebar() throws {
+    func testTabsCompatibilityStyleShowsSidebar() throws {
         let app = try ghosttyApplication()
         app.launch()
-        // create a split
-        app.groups["Terminal pane"].typeKey("d", modifierFlags: .command)
-        app.typeKey("\n", modifierFlags: [.command, .shift])
-        let resetZoomButton = app.groups.buttons["ResetZoom"]
-        let windowTitle = app.windows.firstMatch.title
-        let titleView = app.staticTexts.element(matching: NSPredicate(format: "value == '\(windowTitle)'"))
 
-        XCTAssertEqual(titleView.frame.midY, resetZoomButton.frame.midY, accuracy: 1, "Window title should be vertically centered with reset zoom button: \(titleView.frame.midY) != \(resetZoomButton.frame.midY)")
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Main window should exist")
+        XCTAssertTrue(
+            window.descendants(matching: .any).matching(identifier: "sidebar-new-tab").firstMatch.waitForExistence(timeout: 5),
+            "Left sidebar actions should always be visible"
+        )
+        XCTAssertTrue(rightSidebar(in: window).waitForExistence(timeout: 5), "Right sidebar should be visible")
+        XCTAssertTrue(window.descendants(matching: .any).matching(identifier: "sidebar-right-pr-panel").firstMatch.exists)
+        XCTAssertTrue(window.descendants(matching: .any).matching(identifier: "sidebar-new-tab").firstMatch.exists)
+        XCTAssertTrue(window.descendants(matching: .any).matching(identifier: "sidebar-new-worktree").firstMatch.exists)
     }
 
     @MainActor
-    func testTabsGeometryInNormalWindow() throws {
+    func testNewTabButtonAddsSidebarTab() throws {
         let app = try ghosttyApplication()
         app.launch()
-        app.groups["Terminal pane"].typeKey("t", modifierFlags: .command)
-        XCTAssertEqual(app.tabs.count, 2, "There should be 2 tabs")
-        checkTabsGeometry(app.windows.firstMatch)
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Main window should exist")
+
+        let initialCount = sidebarTabRows(in: window).count
+        let newTabButton = window.descendants(matching: .any).matching(identifier: "sidebar-new-tab").firstMatch
+        XCTAssertTrue(newTabButton.waitForExistence(timeout: 5), "New Tab button should exist")
+
+        newTabButton.click()
+
+        XCTAssertTrue(waitForSidebarTabCount(in: window, expected: initialCount + 1, timeout: 1), "Clicking New Tab should add a new sidebar tab")
     }
 
     @MainActor
-    func testTabsGeometryInFullscreen() throws {
+    func testWorktreeButtonOpensSheet() throws {
         let app = try ghosttyApplication()
         app.launch()
-        app.typeKey("f", modifierFlags: [.command, .control])
-        // using app to type ⌘+t might not be able to create tabs
-        app.groups["Terminal pane"].typeKey("t", modifierFlags: .command)
-        XCTAssertEqual(app.tabs.count, 2, "There should be 2 tabs")
-        checkTabsGeometry(app.windows.firstMatch)
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Main window should exist")
+
+        let button = window.descendants(matching: .any).matching(identifier: "sidebar-new-worktree").firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "New Worktree button should exist")
+
+        button.click()
+
+        let repositoryField = app.descendants(matching: .any).matching(identifier: "worktree-repository-path").firstMatch
+        XCTAssertTrue(repositoryField.waitForExistence(timeout: 1), "Worktree sheet should appear")
     }
 
-    @MainActor
-    func testTabsGeometryAfterMovingTabs() throws {
-        let app = try ghosttyApplication()
-        app.launch()
-        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 1), "Main window should exist")
-        // create another 2 tabs
-        app.groups["Terminal pane"].typeKey("t", modifierFlags: .command)
-        app.groups["Terminal pane"].typeKey("t", modifierFlags: .command)
-
-        // move to the left
-        app.menuItems["_zoomLeft:"].firstMatch.click()
-
-        // create another window with 2 tabs
-        app.windows.firstMatch.groups["Terminal pane"].typeKey("n", modifierFlags: .command)
-        XCTAssertEqual(app.windows.count, 2, "There should be 2 windows")
-
-        // move to the right
-        app.menuItems["_zoomRight:"].firstMatch.click()
-
-        // now second window is the first/main one in the list
-        app.windows.firstMatch.groups["Terminal pane"].typeKey("t", modifierFlags: .command)
-
-        app.windows.element(boundBy: 1).tabs.firstMatch.click() // focus first window
-
-        // now the first window is the main one
-        let firstTabInFirstWindow = app.windows.firstMatch.tabs.firstMatch
-        let firstTabInSecondWindow = app.windows.element(boundBy: 1).tabs.firstMatch
-
-        // drag a tab from one window to another
-        firstTabInFirstWindow.press(forDuration: 0.2, thenDragTo: firstTabInSecondWindow)
-
-        // check tabs in the first
-        checkTabsGeometry(app.windows.firstMatch)
-        // focus another window
-        app.windows.element(boundBy: 1).tabs.firstMatch.click()
-        checkTabsGeometry(app.windows.firstMatch)
+    private func rightSidebar(in window: XCUIElement) -> XCUIElement {
+        window.descendants(matching: .any).matching(identifier: "terminal-right-sidebar").firstMatch
     }
 
-    @MainActor
-    func testTabsGeometryAfterMergingAllWindows() throws {
-        let app = try ghosttyApplication()
-        app.launch()
-        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 1), "Main window should exist")
-
-        // create another 2 windows
-        app.typeKey("n", modifierFlags: .command)
-        app.typeKey("n", modifierFlags: .command)
-
-        // merge into one window, resulting 3 tabs
-        app.menuItems["mergeAllWindows:"].firstMatch.click()
-
-        XCTAssertTrue(app.wait(for: \.tabs.count, toEqual: 3, timeout: 1), "There should be 3 tabs")
-        checkTabsGeometry(app.windows.firstMatch)
+    private func sidebarTabRows(in window: XCUIElement) -> XCUIElementQuery {
+        window.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar-tab-"))
     }
 
-    func checkTabsGeometry(_ window: XCUIElement) {
-        let closeTabButtons = window.buttons.matching(identifier: "_closeButton")
-
-        XCTAssertEqual(closeTabButtons.count, window.tabs.count, "Close tab buttons count should match tabs count")
-
-        var previousTabHeight: CGFloat?
-        for idx in 0 ..< window.tabs.count {
-            let currentTab = window.tabs.element(boundBy: idx)
-            // focus
-            currentTab.click()
-            // switch to the tab
-            window.typeKey("\(idx + 1)", modifierFlags: .command)
-            // add a split
-            window.typeKey("d", modifierFlags: .command)
-            // zoom this split
-            // haven't found a way to locate our reset zoom button yet..
-            window.typeKey("\n", modifierFlags: [.command, .shift])
-            window.typeKey("\n", modifierFlags: [.command, .shift])
-
-            if let previousHeight = previousTabHeight {
-                XCTAssertEqual(currentTab.frame.height, previousHeight, accuracy: 1, "The tab's height should stay the same")
+    private func waitForSidebarTabCount(in window: XCUIElement, expected: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if sidebarTabRows(in: window).count == expected {
+                return true
             }
-            previousTabHeight = currentTab.frame.height
 
-            let titleFrame = currentTab.frame
-            let shortcutLabelFrame = window.staticTexts.element(matching: NSPredicate(format: "value CONTAINS[c] '⌘\(idx + 1)'")).firstMatch.frame
-            let closeButtonFrame = closeTabButtons.element(boundBy: idx).frame
-
-            XCTAssertEqual(titleFrame.midY, shortcutLabelFrame.midY, accuracy: 1, "Tab title should be vertically centered with its shortcut label: \(titleFrame.midY) != \(shortcutLabelFrame.midY)")
-            XCTAssertEqual(titleFrame.midY, closeButtonFrame.midY, accuracy: 1, "Tab title should be vertically centered with its close button: \(titleFrame.midY) != \(closeButtonFrame.midY)")
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
+
+        return sidebarTabRows(in: window).count == expected
     }
 }

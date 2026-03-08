@@ -361,7 +361,8 @@ extension Ghostty {
             let key = "macos-titlebar-style"
             guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
             guard let ptr = v else { return defaultValue }
-            return String(cString: ptr)
+            let value = String(cString: ptr)
+            return value == "tabs" ? "transparent" : value
         }
 
         var macosTitlebarProxyIcon: MacOSTitlebarProxyIcon {

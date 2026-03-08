@@ -1095,8 +1095,7 @@ extension Ghostty {
                     guard let surface = target.target.surface else { return false }
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
-                    // See gotoTab for notes on this check.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard hasMultipleTabs(for: surfaceView) else { return false }
 
                     NotificationCenter.default.post(
                         name: .ghosttyMoveTab,
@@ -1128,7 +1127,7 @@ extension Ghostty {
 
                     // Similar to goto_split (see comment there) about our performability,
                     // we should make this more accurate later.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard hasMultipleTabs(for: surfaceView) else { return false }
 
                     NotificationCenter.default.post(
                         name: Notification.ghosttyGotoTab,
@@ -1143,6 +1142,14 @@ extension Ghostty {
                 }
 
                 return true
+        }
+
+        private static func hasMultipleTabs(for surfaceView: Ghostty.SurfaceView) -> Bool {
+            if let controller = surfaceView.window?.windowController as? TerminalController {
+                return controller.tabs.count > 1
+            }
+
+            return (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1
         }
 
         private static func gotoSplit(
