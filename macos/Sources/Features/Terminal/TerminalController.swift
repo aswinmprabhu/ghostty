@@ -57,7 +57,7 @@ class TerminalController: BaseTerminalController {
     @Published var prReviewSheetModel: TerminalPRReviewSheetModel?
     @Published var fileCommandPaletteModel: TerminalFileCommandPaletteModel?
 
-    private let repositoryService = TerminalRepositoryService.shared
+    let repositoryService = TerminalRepositoryService.shared
     private var pullRequestRefreshTask: Task<Void, Never>?
     private var pullRequestRefreshTimer: Timer?
     private let leftSidebarWidth: CGFloat = 280

@@ -1060,6 +1060,7 @@ struct PierreDiffWebView: NSViewRepresentable {
 
             for (const patch of parsedPatches) {
                 for (const fileDiff of patch.files) {
+
                     const instance = new FileDiff({
                         theme: { dark: 'pierre-dark', light: 'pierre-light' },
                         themeType: 'dark',
@@ -1733,7 +1734,30 @@ struct PierreCombinedDiffWebView: NSViewRepresentable {
                         diffStyle: 'split',
                         overflow: 'scroll',
                         lineHoverHighlight: 'both',
-                        hunkSeparators: 'line-info',
+                        hunkSeparators(hunkData) {
+                            const wrapper = document.createElement('div');
+                            wrapper.style.gridColumn = 'span 2';
+                            const inner = document.createElement('div');
+                            inner.style.cssText = 'position: sticky; left: 0; width: var(--diffs-column-width); display: flex; align-items: center; gap: 8px;';
+                            const lineText = document.createElement('span');
+                            lineText.textContent = (hunkData.lines || '') + ' unmodified lines';
+                            inner.appendChild(lineText);
+                            const ctx = hunkData.hunkContext || hunkData.context || hunkData.header || hunkData.section || '';
+                            if (ctx) {
+                                const ctxSpan = document.createElement('span');
+                                ctxSpan.textContent = ctx;
+                                ctxSpan.style.cssText = 'color: #8b949e; font-style: italic;';
+                                inner.appendChild(ctxSpan);
+                            }
+                            if (!ctx) {
+                                const dbg = document.createElement('span');
+                                dbg.textContent = '[keys: ' + Object.keys(hunkData).join(',') + ']';
+                                dbg.style.cssText = 'color: #f85149; font-size: 10px;';
+                                inner.appendChild(dbg);
+                            }
+                            wrapper.appendChild(inner);
+                            return wrapper;
+                        },
                         expansionLineCount: 20,
                     });
 

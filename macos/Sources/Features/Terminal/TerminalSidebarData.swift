@@ -334,6 +334,7 @@ struct TerminalPullRequestSummary: Equatable, Codable {
     let mergeStateStatus: String
     let baseRefName: String
     let updatedAt: Date
+    let body: String?
 
     /// Whether the PR can be merged (CLEAN or HAS_HOOKS or UNSTABLE).
     var isMergeable: Bool {
@@ -1098,6 +1099,7 @@ actor TerminalRepositoryService {
         let mergeStateStatus: String
         let baseRefName: String
         let updatedAt: Date
+        let body: String?
     }
 
     private struct OpenPullRequestPayload: Decodable {
@@ -1251,7 +1253,7 @@ actor TerminalRepositoryService {
                     "pr",
                     "view",
                     "--json",
-                    "id,number,title,url,mergeStateStatus,baseRefName,updatedAt",
+                    "id,number,title,url,mergeStateStatus,baseRefName,updatedAt,body",
                 ],
                 currentDirectory: context.repositoryRoot
             )
@@ -1278,7 +1280,8 @@ actor TerminalRepositoryService {
             url: url,
             mergeStateStatus: payload.mergeStateStatus,
             baseRefName: payload.baseRefName,
-            updatedAt: payload.updatedAt
+            updatedAt: payload.updatedAt,
+            body: payload.body
         )
     }
 
@@ -1307,6 +1310,20 @@ actor TerminalRepositoryService {
                     "-f", "query=\(query)",
                 ],
                 currentDirectory: context.repositoryRoot
+            )
+        } catch let error as TerminalCommandError {
+            throw mapGHError(error)
+        }
+    }
+
+    func updatePullRequestBody(
+        repositoryRoot: String,
+        body: String
+    ) async throws {
+        do {
+            _ = try await gh(
+                ["pr", "edit", "--body", body],
+                currentDirectory: repositoryRoot
             )
         } catch let error as TerminalCommandError {
             throw mapGHError(error)
@@ -1983,6 +2000,18 @@ actor TerminalRepositoryService {
             )
         }
 
+        // Check if any existing worktree (anywhere on disk) already has this branch
+        if let existingPath = try await findExistingWorktreePath(
+            repositoryRoot: repositoryRoot,
+            branchName: branchName
+        ) {
+            return TerminalWorktreeCreationResult(
+                workingDirectory: existingPath,
+                branchName: branchName,
+                reusedExistingPath: true
+            )
+        }
+
         if FileManager.default.fileExists(atPath: worktreePath) {
             guard try await validateExistingWorktree(
                 at: worktreePath,
@@ -2081,6 +2110,48 @@ actor TerminalRepositoryService {
         } catch {
             return false
         }
+    }
+
+    /// Uses `git worktree list --porcelain` to find an existing worktree for the given branch
+    /// anywhere on disk (not just the default .workspace path).
+    private func findExistingWorktreePath(
+        repositoryRoot: String,
+        branchName: String
+    ) async throws -> String? {
+        let output: TerminalCommandOutput
+        do {
+            output = try await git(
+                ["-C", repositoryRoot, "worktree", "list", "--porcelain"],
+                acceptedExitCodes: [0]
+            )
+        } catch {
+            return nil
+        }
+
+        // Parse porcelain output: blocks separated by blank lines.
+        // Each block has "worktree <path>", "HEAD <sha>", "branch refs/heads/<name>"
+        let blocks = output.stdout.components(separatedBy: "\n\n")
+        for block in blocks {
+            let lines = block.components(separatedBy: "\n")
+            var path: String?
+            var branch: String?
+            for line in lines {
+                if line.hasPrefix("worktree ") {
+                    path = String(line.dropFirst("worktree ".count))
+                } else if line.hasPrefix("branch refs/heads/") {
+                    branch = String(line.dropFirst("branch refs/heads/".count))
+                }
+            }
+            if let path, let branch, branch == branchName {
+                // Don't reuse the main worktree (the bare repo itself)
+                let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+                let standardizedRoot = URL(fileURLWithPath: repositoryRoot).standardizedFileURL.path
+                if standardizedPath != standardizedRoot {
+                    return path
+                }
+            }
+        }
+        return nil
     }
 
     private func ensureTrackingBranchExists(

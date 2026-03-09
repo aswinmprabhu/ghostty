@@ -5,9 +5,10 @@ import UniformTypeIdentifiers
 struct TerminalWindowView: View {
     @ObservedObject var controller: TerminalController
 
-    private let leftSidebarWidth: CGFloat = 280
-    private let rightSidebarWidth: CGFloat = 360
-    private let rightSidebarMinimumWidth: CGFloat = 300
+    @State private var leftSidebarWidth: CGFloat = 280
+    @State private var rightSidebarWidth: CGFloat = 300
+    private let sidebarMinWidth: CGFloat = 200
+    private let sidebarMaxWidth: CGFloat = 500
     private let rightSidebarRailWidth: CGFloat = 32
 
     var body: some View {
@@ -15,7 +16,11 @@ struct TerminalWindowView: View {
             TerminalSidebarView(controller: controller)
                 .frame(width: leftSidebarWidth)
 
-            Divider()
+            ResizableDivider(
+                dimension: $leftSidebarWidth,
+                minValue: sidebarMinWidth,
+                maxValue: sidebarMaxWidth
+            )
 
             if controller.isSelectedRightSidebarCollapsed {
                 terminalContent
@@ -25,18 +30,17 @@ struct TerminalWindowView: View {
                 RightSidebarRail(controller: controller)
                     .frame(width: rightSidebarRailWidth)
             } else {
-                SplitView(
-                    .horizontal,
-                    rightSidebarSplitBinding,
-                    dividerColor: Color(nsColor: .separatorColor)
-                ) {
-                    terminalContent
-                } right: {
-                    TerminalRightSidebarView(controller: controller)
-                        .frame(minWidth: rightSidebarMinimumWidth, idealWidth: rightSidebarWidth)
-                } onEqualize: {
-                    controller.resetSelectedRightSidebarSplit()
-                }
+                terminalContent
+
+                ResizableDivider(
+                    dimension: $rightSidebarWidth,
+                    minValue: sidebarMinWidth,
+                    maxValue: sidebarMaxWidth,
+                    inverted: true
+                )
+
+                TerminalRightSidebarView(controller: controller)
+                    .frame(width: rightSidebarWidth)
             }
         }
         .sheet(item: $controller.worktreeSheetModel) { model in
@@ -73,12 +77,6 @@ struct TerminalWindowView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var rightSidebarSplitBinding: Binding<CGFloat> {
-        Binding(
-            get: { controller.selectedRightSidebarSplit },
-            set: { controller.setSelectedRightSidebarSplit($0) }
-        )
-    }
 }
 
 private struct TerminalSidebarView: View {
@@ -202,18 +200,23 @@ private struct RightSidebarInspector: View {
             PullRequestHeaderCard(controller: controller, tab: tab)
                 .padding(14)
 
-            Picker(
-                "",
-                selection: Binding(
-                    get: { tab.rightSidebarSelection },
-                    set: { controller.setSelectedRightSidebarSelection($0) }
-                )
-            ) {
-                ForEach(TerminalInspectorTab.allCases) { item in
-                    Text(item.title).tag(item)
+            HStack {
+                Spacer(minLength: 0)
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { tab.rightSidebarSelection },
+                        set: { controller.setSelectedRightSidebarSelection($0) }
+                    )
+                ) {
+                    ForEach(TerminalInspectorTab.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
             .accessibilityIdentifier("sidebar-right-tabs")
@@ -300,6 +303,12 @@ private struct PullRequestHeaderCard: View {
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                PRDescriptionView(
+                    controller: controller,
+                    tab: tab,
+                    descriptionText: summary.body
+                )
             } else {
                 Text(tab.pullRequestMessage ?? "Open a repository branch to load pull request details.")
                     .foregroundStyle(.secondary)
@@ -998,6 +1007,103 @@ private struct ReviewSubmissionCard: View {
 
 }
 
+private struct PRDescriptionView: View {
+    @ObservedObject var controller: TerminalController
+    @ObservedObject var tab: TerminalTabState
+    let descriptionText: String?
+
+    @State private var isEditing = false
+    @State private var editText = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isEditing {
+                    Button("Cancel") {
+                        isEditing = false
+                    }
+                    .font(.caption)
+                    .buttonStyle(.plain)
+
+                    Button(isSaving ? "Saving…" : "Save") {
+                        savePRDescription()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundColor(.accentColor)
+                    .disabled(isSaving)
+                } else {
+                    Button {
+                        editText = descriptionText ?? ""
+                        isEditing = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            if isEditing {
+                TextEditor(text: $editText)
+                    .font(.system(size: 11))
+                    .frame(maxHeight: 120)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    )
+            } else if let desc = descriptionText, !desc.isEmpty {
+                ScrollView {
+                    Text(desc)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 100)
+            } else {
+                Text("No description.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func savePRDescription() {
+        guard let root = tab.repositoryRoot else { return }
+        isSaving = true
+        Task {
+            do {
+                try await controller.repositoryService.updatePullRequestBody(
+                    repositoryRoot: root,
+                    body: editText
+                )
+                await MainActor.run {
+                    isSaving = false
+                    isEditing = false
+                    controller.refreshSelectedTabPullRequestFromUI()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                }
+            }
+        }
+    }
+}
+
 private struct ReviewCommentsPreview: View {
     @ObservedObject var tab: TerminalTabState
 
@@ -1437,6 +1543,49 @@ private struct FileTreeFileRow: View {
         case "png", "jpg", "jpeg", "gif", "svg": return "photo"
         default: return "doc"
         }
+    }
+}
+
+/// A draggable divider that resizes a dimension (width or height).
+/// Set `inverted` to true for right-side panels where dragging left increases the dimension.
+private struct ResizableDivider: View {
+    @Binding var dimension: CGFloat
+    let minValue: CGFloat
+    let maxValue: CGFloat
+    var inverted: Bool = false
+
+    @State private var isDragging = false
+    @State private var dragStartWidth: CGFloat = 0
+
+    var body: some View {
+        Rectangle()
+            .fill(isDragging ? Color.accentColor.opacity(0.6) : Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .padding(.horizontal, 2)
+            .frame(width: 5)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        if !isDragging {
+                            isDragging = true
+                            dragStartWidth = dimension
+                        }
+                        let delta = inverted ? -value.translation.width : value.translation.width
+                        let newWidth = dragStartWidth + delta
+                        dimension = min(max(newWidth, minValue), maxValue)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                    }
+            )
     }
 }
 
